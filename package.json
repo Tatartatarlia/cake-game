@@ -1,0 +1,21 @@
+{
+  "name": "cake-game",
+  "private": true,
+  "homepage":".",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "烤蛋糕小店 - React + Canvas 模拟经营小游戏",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}
