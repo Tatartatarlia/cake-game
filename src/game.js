@@ -88,9 +88,10 @@ function sameToppings(a = {}, b = {}) {
 
 let orderIdSeq = 1
 // 生成订单：isUrgent 急单（时间减半、+25分）；isBlind 盲盒（只显示问号，任意食物可交付、随机得分）
+// 盲盒完全独立：不受常规/急单影响，永远不带 urgent 标记、时间不减半、得分固定随机 5~20
 export function generateOrder(isUrgent = false, isBlind = false) {
   const total = ORDER_TIME_MIN + Math.floor(Math.random() * (ORDER_TIME_MAX - ORDER_TIME_MIN + 1))
-  const timeLeft = isUrgent ? Math.max(8, Math.ceil(total / 2)) : total
+  const timeLeft = isUrgent && !isBlind ? Math.max(8, Math.ceil(total / 2)) : total
   if (isBlind) {
     return {
       id: orderIdSeq++,
@@ -99,7 +100,7 @@ export function generateOrder(isUrgent = false, isBlind = false) {
       remaining: [{ type: 'any' }],
       total,
       timeLeft,
-      urgent: isUrgent,
+      urgent: false,
     }
   }
   const count = 1 + Math.floor(Math.random() * 3) // 1-3 个需求
@@ -168,8 +169,8 @@ export function createInitialState() {
 
 function startState() {
   const s = createInitialState()
-  const urgent = Math.random() < urgentChance(GAME_DURATION)
   const blind = Math.random() < BLIND_CHANCE
+  const urgent = !blind && Math.random() < urgentChance(GAME_DURATION)
   const order = generateOrder(urgent, blind)
   return {
     ...s,
@@ -234,22 +235,22 @@ function tick(state) {
     return ic
   })
 
-  // 订单倒计时；超时移除：常规订单扣分，急单不扣分，连击重置
+  // 订单倒计时；超时移除：常规订单扣分，急单/盲盒不扣分，连击重置
   s.orders = s.orders.map((o) => ({ ...o, timeLeft: round1(o.timeLeft - TICK_SEC) }))
   const before = s.orders.length
   const timedOut = s.orders.filter((o) => o.timeLeft <= 0)
   s.orders = s.orders.filter((o) => o.timeLeft > 0)
   if (timedOut.length > 0) {
-    const lostUrgent = timedOut.some((o) => o.urgent)
-    const penalty = timedOut.filter((o) => !o.urgent).length * SCORE_TIMEOUT_PENALTY
+    const lostSpecial = timedOut.some((o) => o.urgent || o.blind)
+    const penalty = timedOut.filter((o) => !o.urgent && !o.blind).length * SCORE_TIMEOUT_PENALTY
     s.combo = 0
     s.score = Math.max(0, s.score - penalty)
-    if (penalty > 0 && lostUrgent) {
-      s = say(s, `常规订单超时 -${penalty} 分，急单超时不扣分；连击重置！`)
+    if (penalty > 0 && lostSpecial) {
+      s = say(s, `常规订单超时 -${penalty} 分，急单/盲盒超时不扣分；连击重置！`)
     } else if (penalty > 0) {
       s = say(s, `订单超时 -${penalty} 分，连击重置！`)
     } else {
-      s = say(s, '急单超时不扣分，但连击重置了…')
+      s = say(s, '急单/盲盒超时不扣分，但连击重置了…')
     }
   }
 
@@ -261,12 +262,13 @@ function tick(state) {
 
   // 生成新订单（前 20 秒最多 2 个，之后最多 3 个）
   // 急单独立生成：每次生成按 urgentChance 判定，不转化已有订单
+  // 盲盒完全独立：命中盲盒则不再判定急单
   const maxNow = maxOrdersAt(s.timeLeft)
   s.orderTimer = round1(s.orderTimer + TICK_SEC)
   if (s.orders.length < maxNow && s.orderTimer >= NEW_ORDER_INTERVAL) {
     s.orderTimer = 0
-    const urgent = Math.random() < urgentChance(s.timeLeft)
     const blind = Math.random() < BLIND_CHANCE
+    const urgent = !blind && Math.random() < urgentChance(s.timeLeft)
     const order = generateOrder(urgent, blind)
     s.orders = [...s.orders, order]
     s.customer = { orderId: order.id, timeLeft: CUSTOMER_DURATION }
@@ -454,10 +456,9 @@ function findOrderMatch(orders, needType, toppings) {
   return null
 }
 
-// 订单完成得分：盲盒随机 5-20（被急单标记则 25）；急单 25；半程内完成 15；常规 10
+// 订单完成得分：盲盒随机 5-20（独立于常规/急单）；急单 25；半程内完成 15；常规 10
 function orderGain(order) {
   if (order.blind) {
-    if (order.urgent) return SCORE_URGENT
     return BLIND_SCORE_MIN + Math.floor(Math.random() * (BLIND_SCORE_MAX - BLIND_SCORE_MIN + 1))
   }
   if (order.urgent) return SCORE_URGENT
@@ -489,7 +490,7 @@ function completeOrderItem(state, orderId, itemIdx) {
     combo += 1
     if (combo > maxCombo) maxCombo = combo
     gained = orderGain(order)
-    if (order.blind && !order.urgent) reason = '盲盒'
+    if (order.blind) reason = '盲盒'
     else if (order.urgent) reason = '急单'
     else if (order.timeLeft > order.total * FAST_RATIO) reason = '快速完成'
     score += gained

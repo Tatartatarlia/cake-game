@@ -78,7 +78,7 @@ function OrderCard({ order }) {
   return (
     <div className={`order-card ${order.urgent ? 'rush' : ''} ${order.blind ? 'blind' : ''} ${urgent ? 'urgent' : ''}`}>
       <div className="order-head">
-        {order.urgent ? '⚡ 急单 · 完成 +25 分 · 超时不扣分' : order.blind ? '🎁 盲盒 · 随机 5~20 分' : '📋 顾客订单'}
+        {order.urgent ? '⚡ 急单 · 完成 +25 分 · 超时不扣分' : order.blind ? '🎁 盲盒 · 随机 5~20 分 · 超时不扣分' : '📋 顾客订单'}
       </div>
       <div className="order-needs">
         {order.remaining.map((n, i) => (
