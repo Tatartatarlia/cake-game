@@ -11,6 +11,10 @@ export const READY_WINDOW = 8          // 烤好后取出窗口秒数（超时�
 export const ICE_CREAM_TIME = 4        // 冰激凌制作秒数
 export const TICK_SEC = 0.1            // 逻辑 tick 步长（秒）
 export const NEW_ORDER_INTERVAL = 7    // 新订单生成间隔（秒）
+export const ORDER_INTERVAL_STEP = 0.5 // 经营模式每过一天，间隔缩短的秒数
+export const ORDER_INTERVAL_FLOOR = 4  // 经营模式订单间隔的最短秒数
+export const RUSH_INTERVAL_CUT = 2     // 午市高峰在当天间隔上再缩短的秒数
+export const RUSH_INTERVAL_FLOOR = 3   // 午市高峰时订单间隔的最短秒数
 export const CUSTOMER_DURATION = 3.2   // 顾客探头时长（秒）
 
 // ---------- 订单上限 ----------
@@ -114,6 +118,24 @@ export function clampCatChance(p) {
 
 export function rentForDay(day) {
   return RENT_BASE + Math.max(0, day - 1) * RENT_STEP
+}
+
+// 经营模式：第 1 天 7 秒，之后每天短 0.5 秒，最短 4 秒
+export function orderIntervalForDay(day) {
+  const d = Math.max(1, day || 1)
+  const shortened = NEW_ORDER_INTERVAL - (d - 1) * ORDER_INTERVAL_STEP
+  return Math.max(ORDER_INTERVAL_FLOOR, Math.round(shortened * 10) / 10)
+}
+
+// 把“第几天”和当日状况叠到规则上。午市高峰是在当天间隔上再快 2 秒
+export function rulesForDay(rules, day) {
+  const r = { ...rules }
+  let interval = orderIntervalForDay(day)
+  if (r.rushOrders) {
+    interval = Math.max(RUSH_INTERVAL_FLOOR, Math.round((interval - RUSH_INTERVAL_CUT) * 10) / 10)
+  }
+  r.newOrderInterval = interval
+  return r
 }
 
 export function comboTip(combo, rules = baseRules()) {
@@ -269,7 +291,7 @@ export const UPGRADES = [
 
 export const MODIFIERS = [
   { id: 'cats', name: '猫咪巡店', desc: '猫来得更勤，出现概率提高' },
-  { id: 'rush', name: '午市高峰', desc: '新订单间隔变为 5 秒，订单时限变为九折' },
+  { id: 'rush', name: '午市高峰', desc: '新订单比当天再快 2 秒，订单时限变为九折' },
   { id: 'dessert', name: '甜品热卖', desc: '订单里更常出现冰激凌' },
   { id: 'strict', name: '严格考核', desc: '常规订单超时扣 8 分' },
   { id: 'blind', name: '盲盒专场', desc: '盲盒订单大幅变多，当天收入更看运气' },
@@ -317,7 +339,7 @@ export function applyModifier(rules, modifierId) {
       r.catChance = r.catChance + 0.2
       break
     case 'rush':
-      r.newOrderInterval = 5
+      r.rushOrders = true
       r.orderTimeScale = 0.9
       break
     case 'dessert':
@@ -501,22 +523,26 @@ function startPractice() {
 }
 
 function beginDay(prev, { day, rules, modifier, rent }) {
-  const { order, urgent, blind } = openOrder(rules)
+  const paced = rulesForDay(rules, day)
+  const { order, urgent, blind } = openOrder(paced)
   const mod = modifier ? modifierById(modifier) : null
   let message = mod
     ? `第 ${day} 天 · ${mod.name}：${mod.desc}`
     : `第 ${day} 天开业！今晚租金 ${rent}`
+  if (paced.newOrderInterval < NEW_ORDER_INTERVAL) {
+    message += `。订单间隔 ${paced.newOrderInterval} 秒`
+  }
   if (urgent) message += '。开门就是急单！'
   else if (blind) message += '。第一单是盲盒！'
   return {
     ...prev,
     screen: 'playing',
     mode: 'business',
-    rules,
+    rules: paced,
     day,
     rent,
     modifier: modifier || null,
-    timeLeft: rules.gameDuration,
+    timeLeft: paced.gameDuration,
     score: 0,
     completedOrders: 0,
     combo: 0,
@@ -527,7 +553,7 @@ function beginDay(prev, { day, rules, modifier, rent }) {
     cat: null,
     ovens: emptyOvens(),
     plates: emptyPlates(),
-    freezers: rules.prefab ? [{}, null, null] : [null, null, null],
+    freezers: paced.prefab ? [{}, null, null] : [null, null, null],
     iceCreams: emptyIceCreams(),
     customer: { orderId: order.id, timeLeft: CUSTOMER_DURATION },
     shopOffers: [],

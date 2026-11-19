@@ -2,6 +2,7 @@
 import {
   reducer, createInitialState, generateOrder,
   comboTip, rulesFromUpgrades, applyModifier, rollShopOffers,
+  orderIntervalForDay, rulesForDay, baseRules,
   CAT_CHANCE, CAT_CHANCE_MIN, BAKE_TIME, RENT_BASE, RENT_STEP,
   COMBO_TIP_STEP, COMBO_TIP_CAP, TICK_SEC, considerRecord, emptyRecords,
   saveBusinessRun, loadBusinessSave, clearBusinessSave, saveSummary, BUSINESS_SAVE_KEY,
@@ -149,6 +150,7 @@ console.log('5. 经营模式租金与商店')
   ok(day2.rules.catChance > 0, `第 2 天猫概率 ${day2.rules.catChance} > 0`)
   ok(day2.freezers[0] && !day2.freezers[0].cream, '开业预制放进冰箱')
   ok(day2.rules.bakeTime === BAKE_TIME + 1, `烤箱老化后烘烤 ${day2.rules.bakeTime} 秒`)
+  ok(day2.rules.newOrderInterval === 6.5, `第 2 天订单间隔 ${day2.rules.newOrderInterval} 秒`)
 }
 
 console.log('6. 练习模式仍是单局结算')
@@ -198,6 +200,20 @@ console.log('8. 经营存档')
   clearBusinessSave()
   ok(loadBusinessSave() === null, '可以清掉存档')
   ok(!mem.has(BUSINESS_SAVE_KEY), '存档键已删除')
+}
+
+console.log('9. 订单间隔随天数缩短')
+{
+  ok(orderIntervalForDay(1) === 7, '第 1 天仍是 7 秒')
+  ok(orderIntervalForDay(2) === 6.5, '第 2 天 6.5 秒')
+  ok(orderIntervalForDay(7) === 4, '第 7 天到达 4 秒')
+  ok(orderIntervalForDay(12) === 4, '之后保持 4 秒')
+  const rushDay1 = rulesForDay(applyModifier(baseRules(), 'rush'), 1)
+  ok(rushDay1.newOrderInterval === 5 && rushDay1.orderTimeScale === 0.9, '第 1 天午市高峰仍是 5 秒，时限九折')
+  const rushDay5 = rulesForDay(applyModifier(baseRules(), 'rush'), 5)
+  ok(rushDay5.newOrderInterval === 3, `第 5 天午市高峰 ${rushDay5.newOrderInterval} 秒`)
+  const plain = rulesForDay(baseRules(), 1)
+  ok(plain.newOrderInterval === 7, '没有状况时第 1 天不缩短')
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
