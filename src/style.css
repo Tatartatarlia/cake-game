@@ -41,8 +41,10 @@ body {
 .game-header {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   background: #fff;
   border-radius: 14px;
   padding: 8px 16px;
@@ -59,7 +61,9 @@ body {
 
 .hud {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 14px;
 }
 
@@ -149,6 +153,7 @@ body {
 
 .btn-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   justify-content: center;
   margin-top: 16px;
@@ -624,6 +629,171 @@ body {
   margin-bottom: 6px;
 }
 
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-mode {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  background: #c94f7c;
+  border-radius: 999px;
+  padding: 2px 8px;
+  letter-spacing: 0;
+}
+
+.hud-chip {
+  font-size: 13px;
+  font-weight: 800;
+  color: #6a5548;
+  background: #f7efe8;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.hud-chip.day {
+  color: #c94f7c;
+  background: #ffe4ef;
+}
+
+.hud-chip.rent.safe {
+  color: #1f8a3b;
+  background: #e5f6e8;
+}
+
+.panel.wide {
+  max-width: 760px;
+}
+
+.mode-grid,
+.mod-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+
+.mode-card {
+  text-align: left;
+  background: #fff8f0;
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  border: 2px solid #ffe0ec;
+}
+
+.mode-card h3 {
+  color: #c94f7c;
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+
+.mode-card p,
+.mod-card p,
+.shop-card p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5a4a3a;
+}
+
+.mode-record {
+  font-weight: 800;
+  color: #e09020;
+  margin: 8px 0;
+}
+
+.pay-line {
+  font-size: 15px;
+  font-weight: 800;
+  color: #5a4a3a;
+  margin-bottom: 6px;
+}
+
+.owned-line {
+  font-size: 13px;
+  color: #8a5a44;
+  margin: 4px 0 8px;
+}
+
+.new-record {
+  color: #e8484e;
+  font-weight: 900;
+  font-size: 18px;
+  margin: 4px 0;
+}
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.shop-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 2px solid #ffe0ec;
+  background: #fff8f0;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.shop-card b,
+.mod-card b {
+  display: block;
+  color: #c94f7c;
+}
+
+.mod-card {
+  text-align: left;
+  border: 2px solid #ffe0ec;
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.mod-card:hover {
+  border-color: #ff6b9d;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.overlay.front {
+  z-index: 30;
+}
+
+.menu-hint {
+  color: #1f8a3b;
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.save-note {
+  background: #fff8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #8a5a44;
+  line-height: 1.5;
+}
+
 /* ---------------- 手机适配：一屏内无需滚动 ---------------- */
 @media (max-width: 860px) {
   .game-shell {
@@ -634,14 +804,27 @@ body {
   .game-header {
     padding: 5px 10px;
     border-radius: 10px;
+    flex-wrap: wrap;
   }
 
   .logo {
     font-size: 15px;
   }
 
+  .logo-mode {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
   .hud {
     gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .hud-chip {
+    font-size: 10px;
+    padding: 2px 6px;
   }
 
   .hud-score {
@@ -805,5 +988,15 @@ body {
     font-size: 12px;
     line-height: 1.7;
     padding: 10px 12px;
+  }
+
+  .mode-grid,
+  .mod-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-card {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
