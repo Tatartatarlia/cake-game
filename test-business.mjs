@@ -4,7 +4,8 @@ import {
   comboTip, rulesFromUpgrades, applyModifier, rollShopOffers,
   orderIntervalForDay, rulesForDay, baseRules,
   CAT_CHANCE, CAT_CHANCE_MIN, BAKE_TIME, RENT_BASE, RENT_STEP,
-  COMBO_TIP_STEP, COMBO_TIP_CAP, TICK_SEC, considerRecord, emptyRecords,
+  RENOWN_COST_BASE, RENOWN_COST_STEP, SCORE_URGENT, COMBO_TIP_CAP, COMBO_TIP_CAP_UPGRADED,
+  COMBO_TIP_STEP, TICK_SEC, considerRecord, emptyRecords,
   saveBusinessRun, loadBusinessSave, clearBusinessSave, saveSummary, BUSINESS_SAVE_KEY,
 } from './src/game.js'
 
@@ -214,6 +215,41 @@ console.log('9. 订单间隔随天数缩短')
   ok(rushDay5.newOrderInterval === 3, `第 5 天午市高峰 ${rushDay5.newOrderInterval} 秒`)
   const plain = rulesForDay(baseRules(), 1)
   ok(plain.newOrderInterval === 7, '没有状况时第 1 天不缩短')
+}
+
+console.log('10. 口碑可重复购买')
+{
+  const maxed = { fire: 2, window: 2, lucky: 2, bell: 2, icm: 2, prefab: 1, tip: 1, urgent: 2 }
+  const soldOut = rollShopOffers(maxed, 8)
+  ok(soldOut.length === 1 && soldOut[0].id === 'renown', '常规升级买完后商店只剩口碑')
+  ok(soldOut[0].cost === RENOWN_COST_BASE, `第一次 ${soldOut[0].cost}`)
+  ok(soldOut[0].desc.includes('小费上限 +2') && soldOut[0].desc.includes('急单得分 +2'), soldOut[0].desc)
+
+  const again = rollShopOffers({ ...maxed, renown: 1 }, 8)
+  ok(again[0].cost === RENOWN_COST_BASE + RENOWN_COST_STEP, `第二次 ${again[0].cost}`)
+  ok(again[0].level === 1, '显示已有等级')
+
+  const thin = rollShopOffers({ ...maxed, fire: 1 }, 8)
+  ok(thin.some((o) => o.id === 'fire') && thin.some((o) => o.id === 'renown'), '常规升级不够 3 件时补上一件口碑')
+  ok(!rollShopOffers({}, 1).some((o) => o.id === 'renown'), '开业牌池还满时不出现口碑')
+
+  const once = rulesFromUpgrades({ renown: 1 })
+  ok(once.comboTipCap === COMBO_TIP_CAP + 2, `口碑后小费上限 ${once.comboTipCap}`)
+  ok(once.scoreUrgent === SCORE_URGENT + 2, `口碑后急单 ${once.scoreUrgent}`)
+  ok(comboTip(6, once) === 14, '6 连吃到提高后的上限')
+
+  const stacked = rulesFromUpgrades({ tip: 1, urgent: 2, renown: 3 })
+  ok(stacked.comboTipCap === COMBO_TIP_CAP_UPGRADED + 6, `小费罐叠加后上限 ${stacked.comboTipCap}`)
+  ok(stacked.scoreUrgent === SCORE_URGENT + 16 + 6, `急单赏金叠加后 ${stacked.scoreUrgent}`)
+
+  let s = reducer(createInitialState(), { type: 'START_BUSINESS' })
+  s = reducer({ ...s, score: 400, upgrades: maxed, wallet: 0 }, { type: 'SETTLE' })
+  ok(s.screen === 'shop' && s.shopOffers.length === 1 && s.shopOffers[0].id === 'renown', '卖空后打烊仍进商店')
+  const price = s.shopOffers[0].cost
+  s = { ...s, wallet: price }
+  s = reducer(s, { type: 'BUY_UPGRADE', id: 'renown' })
+  ok(s.wallet === 0 && s.upgrades.renown === 1, '买入口碑并扣款')
+  ok(s.shopOffers.length === 0, '同一晚不能连买第二次')
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

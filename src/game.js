@@ -60,6 +60,13 @@ export const COMBO_TIP_CAP_UPGRADED = 20
 export const RENT_BASE = 50
 export const RENT_STEP = 30
 
+// 口碑可重复购买。第一次 60，之后每次贵 30。
+// 每次只加一点小费上限和急单分，避免买完常规升级后收入完全停住。
+export const RENOWN_COST_BASE = 60
+export const RENOWN_COST_STEP = 30
+export const RENOWN_TIP_CAP = 2
+export const RENOWN_URGENT_BONUS = 2
+
 export const RECORD_KEY = 'cake-shop-records'
 export const BUSINESS_SAVE_KEY = 'cake-shop-business-save'
 
@@ -287,6 +294,21 @@ export const UPGRADES = [
       return `急单得分 ${from} → ${to}`
     },
   },
+  {
+    id: 'renown',
+    name: '口碑',
+    repeatable: true,
+    fromDay: 1,
+    costAt(level) {
+      return RENOWN_COST_BASE + level * RENOWN_COST_STEP
+    },
+    describe(level) {
+      const owned = level * RENOWN_TIP_CAP
+      const next = owned + RENOWN_TIP_CAP
+      if (level <= 0) return `小费上限 +${RENOWN_TIP_CAP}，急单得分 +${RENOWN_URGENT_BONUS}`
+      return `小费上限 +${owned} → +${next}，急单得分 +${owned} → +${next}`
+    },
+  },
 ]
 
 export const MODIFIERS = [
@@ -305,7 +327,7 @@ export function modifierById(id) {
 export function upgradeSummary(upgrades = {}) {
   return UPGRADES
     .filter((u) => (upgrades[u.id] || 0) > 0)
-    .map((u) => (u.maxLevel > 1 ? `${u.name} Lv${upgrades[u.id]}` : u.name))
+    .map((u) => (u.repeatable || u.maxLevel > 1 ? `${u.name}\u00A0Lv${upgrades[u.id]}` : u.name))
     .join('、')
 }
 
@@ -327,6 +349,11 @@ export function rulesFromUpgrades(upgrades = {}) {
     r.comboTipCap = COMBO_TIP_CAP_UPGRADED
   }
   r.scoreUrgent = SCORE_URGENT + (upgrades.urgent || 0) * 8
+  const renown = upgrades.renown || 0
+  if (renown > 0) {
+    r.comboTipCap += renown * RENOWN_TIP_CAP
+    r.scoreUrgent += renown * RENOWN_URGENT_BONUS
+  }
   r.prefab = (upgrades.prefab || 0) >= 1
   return r
 }
@@ -361,18 +388,27 @@ export function applyModifier(rules, modifierId) {
   return r
 }
 
+function offerFrom(upgrade, upgrades) {
+  const level = upgrades[upgrade.id] || 0
+  const cost = upgrade.repeatable ? upgrade.costAt(level) : upgrade.costs[level]
+  return {
+    id: upgrade.id,
+    name: upgrade.name,
+    level,
+    cost,
+    desc: upgrade.describe(level),
+  }
+}
+
 export function rollShopOffers(upgrades = {}, day = 1) {
-  const pool = UPGRADES.filter((u) => (upgrades[u.id] || 0) < u.maxLevel && day >= u.fromDay)
-  return shuffle(pool).slice(0, 3).map((u) => {
-    const level = upgrades[u.id] || 0
-    return {
-      id: u.id,
-      name: u.name,
-      level,
-      cost: u.costs[level],
-      desc: u.describe(level),
-    }
-  })
+  const pool = UPGRADES.filter((u) => !u.repeatable && (upgrades[u.id] || 0) < u.maxLevel && day >= u.fromDay)
+  const picked = shuffle(pool).slice(0, 3)
+  // 常规升级还够抽满 3 件时不掺入口碑，卖得差不多了才补上，卖空后仍有一件可买
+  if (picked.length < 3) {
+    const extra = UPGRADES.find((u) => u.repeatable && day >= u.fromDay)
+    if (extra) picked.push(extra)
+  }
+  return picked.map((u) => offerFrom(u, upgrades))
 }
 
 export function rollModifiers(count = 2) {
