@@ -3,7 +3,8 @@ import {
   reducer, createInitialState, generateOrder,
   comboTip, rulesFromUpgrades, applyModifier, rollShopOffers,
   orderIntervalForDay, rulesForDay, baseRules,
-  CAT_CHANCE, CAT_CHANCE_MIN, BAKE_TIME, RENT_BASE, RENT_STEP,
+  CAT_CHANCE, CAT_CHANCE_MIN, BAKE_TIME, RENT_BASE,
+  rentForDay, FINITE_GOAL, LEGACY_DIFFICULTY, HISTORY_LIMIT, loadRecords, RECORD_KEY,
   RENOWN_COST_BASE, RENOWN_COST_STEP, SCORE_URGENT, COMBO_TIP_CAP, COMBO_TIP_CAP_UPGRADED,
   COMBO_TIP_STEP, TICK_SEC, considerRecord, emptyRecords,
   saveBusinessRun, loadBusinessSave, clearBusinessSave, saveSummary, BUSINESS_SAVE_KEY,
@@ -145,7 +146,7 @@ console.log('5. 经营模式租金与商店')
   }
   const day2 = reducer(pick, { type: 'PICK_MODIFIER', id: 'oven' })
   ok(day2.screen === 'playing' && day2.day === 2, '进入第 2 天')
-  ok(day2.rent === RENT_BASE + RENT_STEP, `第 2 天租金 ${day2.rent}`)
+  ok(day2.rent === rentForDay(2, day2.difficulty), `第 2 天租金 ${day2.rent}`)
   ok(day2.modifier === 'oven', '状况生效')
   ok(day2.score === 0 && day2.combo === 0, '当天分数和连击重新计')
   ok(day2.rules.catChance > 0, `第 2 天猫概率 ${day2.rules.catChance} > 0`)
@@ -166,13 +167,27 @@ console.log('7. 纪录比较')
 {
   const prev = emptyRecords()
   const practice = considerRecord(prev, { screen: 'over', mode: 'practice', score: 80 })
-  ok(practice.practiceScore === 80, '练习纪录写入分数')
-  const same = considerRecord(practice, { screen: 'over', mode: 'practice', score: 80 })
-  ok(same === practice, '相同分数不刷新')
-  const business = considerRecord(prev, { screen: 'over', mode: 'business', daysCleared: 3, totalEarned: 400, day: 3 })
-  ok(business.businessDays === 3 && business.businessEarned === 400, '经营纪录按天数')
-  const fewer = considerRecord(business, { screen: 'over', mode: 'business', daysCleared: 2, totalEarned: 9999, day: 2 })
-  ok(fewer === business, '天数更少不覆盖')
+  ok(practice.practiceScore === 80 && practice.improved, '练习纪录写入分数')
+  ok(practice.history[0].mode === 'practice' && practice.history[0].score === 80, '练习记入最近对局')
+  const stored = { practiceScore: practice.practiceScore, bests: practice.bests, history: practice.history }
+  const same = considerRecord(stored, { screen: 'over', mode: 'practice', score: 80 })
+  ok(same.practiceScore === 80 && !same.improved && same.history.length === 2, '相同分数不刷新最高，但仍记一局')
+  const business = considerRecord(stored, {
+    screen: 'over', mode: 'business', span: 'infinite', difficulty: 2,
+    daysCleared: 3, totalEarned: 400, day: 3, won: false,
+  })
+  ok(business.bests.length === 1 && business.bests[0].days === 3 && business.bests[0].difficulty === 2 && business.improved, '经营纪录按难度记下天数')
+  const kept = { practiceScore: business.practiceScore, bests: business.bests, history: business.history }
+  const fewer = considerRecord(kept, {
+    screen: 'over', mode: 'business', span: 'infinite', difficulty: 2,
+    daysCleared: 2, totalEarned: 9999, day: 2,
+  })
+  ok(!fewer.improved && fewer.bests[0].days === 3 && fewer.history.length === 3, '同一难度天数更少不覆盖')
+  const other = considerRecord(
+    { practiceScore: fewer.practiceScore, bests: fewer.bests, history: fewer.history },
+    { screen: 'over', mode: 'business', span: 'finite', difficulty: 2, daysCleared: 10, totalEarned: 100, day: 10, won: true },
+  )
+  ok(other.bests.length === 2 && other.improved, '有限和无限分开记')
 }
 
 console.log('8. 经营存档')
@@ -250,6 +265,50 @@ console.log('10. 口碑可重复购买')
   s = reducer(s, { type: 'BUY_UPGRADE', id: 'renown' })
   ok(s.wallet === 0 && s.upgrades.renown === 1, '买入口碑并扣款')
   ok(s.shopOffers.length === 0, '同一晚不能连买第二次')
+}
+
+console.log('11. 难度、通关和结束清档')
+{
+  ok(rentForDay(1, 1) === RENT_BASE && rentForDay(1, 8) === RENT_BASE, '第 1 天租金不看难度')
+  ok(rentForDay(2, 1) === RENT_BASE + 5, '难度 1 每晚 +5')
+  ok(rentForDay(4, 3) === RENT_BASE + 3 * 15, '难度 3 每晚 +15')
+  let finite = reducer(createInitialState(), { type: 'START_BUSINESS', span: 'finite', difficulty: 3, notice: 'fresh' })
+  ok(finite.span === 'finite' && finite.difficulty === 3, '有限模式带上难度')
+  ok(String(finite.message).includes(`满 ${FINITE_GOAL} 天通关`), '开业写明通关天数')
+  const played = { ...finite, score: 500, wallet: 0, timeLeft: 20, completedOrders: 2 }
+  const day9 = reducer({ ...played, day: 9, rent: rentForDay(9, 3) }, { type: 'SETTLE' })
+  ok(day9.screen === 'shop' && !day9.won, '第 9 天付清后还没通关')
+  const win = reducer({ ...played, day: 10, rent: rentForDay(10, 3) }, { type: 'SETTLE' })
+  ok(win.screen === 'over' && win.won && win.daysCleared === FINITE_GOAL, '付清第 10 天即通关')
+  ok(win.wallet === 500 - rentForDay(10, 3), '通关时租金已付')
+  const lose = reducer({ ...played, day: 10, score: 0, wallet: 10, rent: rentForDay(10, 3) }, { type: 'SETTLE' })
+  ok(lose.screen === 'over' && !lose.won, '第 10 天付不起则关张')
+  let endless = reducer(createInitialState(), { type: 'START_BUSINESS', span: 'infinite', difficulty: 1 })
+  endless = reducer({ ...endless, day: 10, score: 400, wallet: 0, rent: rentForDay(10, 1), timeLeft: 20, completedOrders: 1 }, { type: 'SETTLE' })
+  ok(endless.screen === 'shop' && !endless.won, '无限模式第 10 天继续营业')
+  const capped = reducer(createInitialState(), { type: 'START_BUSINESS', difficulty: 99 })
+  ok(capped.difficulty === 10, '难度最高 10')
+
+  let rec = emptyRecords()
+  for (let i = 0; i < 12; i++) {
+    const next = considerRecord(
+      { practiceScore: rec.practiceScore, bests: rec.bests, history: rec.history },
+      { screen: 'over', mode: 'practice', score: i },
+    )
+    rec = { practiceScore: next.practiceScore, bests: next.bests, history: next.history }
+  }
+  ok(rec.history.length === HISTORY_LIMIT && rec.history[0].score === 11 && rec.practiceScore === 11, '只留最近 10 局')
+
+  const mem = globalThis.localStorage
+  mem.setItem(RECORD_KEY, JSON.stringify({ practiceScore: 12, businessDays: 2, businessEarned: 73 }))
+  const legacy = loadRecords()
+  ok(legacy.practiceScore === 12, '旧练习分还在')
+  ok(legacy.bests[0].span === 'infinite' && legacy.bests[0].difficulty === LEGACY_DIFFICULTY && legacy.bests[0].days === 2, '旧经营纪录视为无限难度 6')
+  mem.setItem(BUSINESS_SAVE_KEY, JSON.stringify({
+    mode: 'business', screen: 'over', won: true, orders: [{}], rules: { gameDuration: 60 },
+  }))
+  ok(loadBusinessSave() === null, '已经结束的存档不再读取')
+  ok(mem.getItem(BUSINESS_SAVE_KEY) == null, '已经结束的存档被清掉')
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

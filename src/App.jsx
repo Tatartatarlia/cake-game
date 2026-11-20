@@ -10,12 +10,23 @@ import {
   modifierById,
   upgradeSummary,
   rentForDay,
+  rentStepFor,
+  spanName,
   loadRecords,
   saveRecords,
   considerRecord,
   loadBusinessSave,
   saveBusinessRun,
+  clearBusinessSave,
   saveSummary,
+  bestFor,
+  sortedBests,
+  formatBest,
+  formatHistory,
+  RENT_BASE,
+  FINITE_GOAL,
+  DIFFICULTY_MIN,
+  DIFFICULTY_MAX,
 } from './game.js'
 import { FoodCanvas, CustomerCanvas, CatCanvas, drawIngredientIcon } from './draw.jsx'
 
@@ -68,15 +79,18 @@ function Header({ state, dispatch }) {
       <div className="logo">
         🍰 烤蛋糕小店
         {state.screen !== 'start' && (
-          <span className="logo-mode">{business ? '经营' : '练习'}</span>
+          <span className="logo-mode">{business ? spanName(state.span) : '练习'}</span>
         )}
       </div>
       <div className="hud">
         {business && (
           <div className="hud-chip day" title={mod ? mod.desc : '开业日，没有额外状况'}>
-            第 {state.day} 天 · {mod ? mod.name : '开业'}
+            {state.span === 'finite' ? `有限 ${state.day}/${FINITE_GOAL}` : `无限 第 ${state.day} 天`}
+            {' · '}
+            {mod ? mod.name : '开业'}
           </div>
         )}
+        {business && <div className="hud-chip">难度 {state.difficulty}</div>}
         <div className="hud-score">{business ? '今日' : '⭐'} {state.score}</div>
         {business && <div className="hud-chip">手头 {state.wallet}</div>}
         {business && (
@@ -373,7 +387,7 @@ function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) 
     <div className="overlay">
       <div className="panel start-panel wide">
         <h1>🍰 烤蛋糕小店</h1>
-        <p className="subtitle">先选一种开店方式。两种模式各自记下历史最高纪录。</p>
+        <p className="subtitle">练习和每种经营难度分开记最高，并留下最近 10 局。</p>
         {menuHint && <p className="menu-hint">{menuHint}</p>}
         <div className="mode-grid">
           <section className="mode-card">
@@ -386,10 +400,9 @@ function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) 
           </section>
           <section className="mode-card">
             <h3>经营模式</h3>
-            <p>每天仍是 60 秒。打烊后返回主界面会存下这一局，下次可以接着经营。</p>
+            <p>每天 60 秒。可选有限或无限，并自选难度。进行中会存档，关张或通关后存档清除。</p>
             <p className="mode-record">
-              最高纪录：{records.businessDays} 天
-              {records.businessDays > 0 ? ` · 累计 ${records.businessEarned}` : ''}
+              {records.bests.length > 0 ? `已记下 ${records.bests.length} 个难度的最高纪录` : '最高纪录：还没有'}
             </p>
             {businessSave && <p className="save-note">存档：{saveSummary(businessSave)}</p>}
             <button className="btn" onClick={onBusiness}>
@@ -402,8 +415,28 @@ function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) 
           <li>📋 订单时限 15-40 秒；常规超时 <b>-5</b>，急单和盲盒超时不扣分。常规 <b>+10</b>，半程前完成 <b>+15</b>，急单 <b>+25</b>，盲盒随机 <b>5~20</b></li>
           <li>🧁 蛋糕胚烤 5 秒，8 秒内取出；超时会糊，双击清理。奶油百搭，巧克力不能和草莓、芒果同时放</li>
           <li>🐱 猫会靠近蛋糕，3 秒内点走。烤糊和被偷都不断连击</li>
-          <li>🏪 经营模式第 1 天租金 50，之后每晚 +30。新订单间隔从第 2 天起每天缩短 0.5 秒，最短 4 秒。常规升级变少后可买「口碑」：小费上限和急单得分各 +2，越买越贵。打烊后返回主界面会存档</li>
+          <li>🏪 经营模式第 1 天租金 50。难度 1 之后每晚 +5，难度每高 1 级再多 +5。有限模式满 10 天通关。订单间隔从第 2 天起每天缩短 0.5 秒，最短 4 秒。常规升级变少后可买「口碑」</li>
         </ul>
+        <div className="history-block">
+          <h3>历史最高</h3>
+          <ul className="history-list">
+            <li>练习 · {records.practiceScore} 分</li>
+            {sortedBests(records).map((best) => (
+              <li key={`${best.span}-${best.difficulty}`}>{formatBest(best)}</li>
+            ))}
+            {records.bests.length === 0 && <li>经营模式还没有纪录</li>}
+          </ul>
+          <h3>最近对局</h3>
+          {records.history.length === 0 ? (
+            <p className="subtitle">还没有对局。</p>
+          ) : (
+            <ol className="history-list">
+              {records.history.map((item, index) => (
+                <li key={index}>{formatHistory(item)}</li>
+              ))}
+            </ol>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -431,20 +464,24 @@ function PauseOverlay({ state, dispatch }) {
 function GameOverScreen({ state, dispatch, records, justRecord, onMenu, onNewBusiness }) {
   if (state.mode === 'business') {
     const owned = upgradeSummary(state.upgrades)
+    const best = bestFor(records, state.span, state.difficulty)
     return (
       <div className="overlay">
         <div className="panel">
-          <h2>店铺关张</h2>
+          <h2>{state.won ? '通关！' : '店铺关张'}</h2>
           {justRecord && <div className="new-record">新纪录！</div>}
           <div className="final-score">
-            {state.daysCleared ?? state.day} <span>天</span>
+            {state.won ? FINITE_GOAL : (state.daysCleared ?? state.day)} <span>天</span>
           </div>
-          <div className="stat-line">{state.lostReason}</div>
+          <div className="stat-line">
+            {spanName(state.span)} · 难度 {state.difficulty} · 每晚 +{rentStepFor(state.difficulty)}
+          </div>
+          {state.lostReason && <div className="stat-line">{state.lostReason}</div>}
           <div className="stat-line">
             累计报酬 {state.totalEarned} · 完成订单 {state.runCompleted} 单 · 最高连击 x{state.runMaxCombo}
           </div>
           {owned && <div className="owned-line">设备：{owned}</div>}
-          <div className="stat-line">历史最高：{records.businessDays} 天 · 累计 {records.businessEarned}</div>
+          <div className="stat-line">历史最高：{best ? formatBest(best) : '还没有'}</div>
           <div className="btn-row">
             <button className="btn big ghost" onClick={onMenu}>返回主界面</button>
             <button className="btn big" onClick={onNewBusiness}>再开一轮</button>
@@ -516,12 +553,15 @@ function ShopScreen({ state, dispatch, onMenu }) {
 
 function ModifierScreen({ state, dispatch, onMenu }) {
   const owned = upgradeSummary(state.upgrades)
-  const nextRent = rentForDay(state.day + 1)
+  const nextDay = state.day + 1
+  const nextRent = rentForDay(nextDay, state.difficulty)
+  const lastDay = state.span === 'finite' && nextDay >= FINITE_GOAL
   return (
     <div className="overlay">
       <div className="panel wide">
         <h2>明天怎么营业？</h2>
-        <p className="pay-line">第 {state.day + 1} 天租金 {nextRent} · 手头 {state.wallet}</p>
+        <p className="pay-line">第 {nextDay} 天租金 {nextRent} · 手头 {state.wallet}</p>
+        {lastDay && <p className="subtitle">明天付清租金就通关。</p>}
         {owned && <p className="owned-line">已有：{owned}</p>}
         <p className="subtitle">选一个状况就开业。返回主界面会把这一局存下来，下次仍从这里接着选。</p>
         <div className="mod-grid">
@@ -544,33 +584,77 @@ function ModifierScreen({ state, dispatch, onMenu }) {
   )
 }
 
-function SaveGate({ save, confirmNew, onContinue, onAskNew, onConfirmNew, onBack }) {
+function SaveGate({ save, onContinue, onSetup, onBack }) {
   return (
     <div className="overlay front">
       <div className="panel">
-        {confirmNew ? (
+        <h2>经营模式</h2>
+        <p className="save-note">存档：{saveSummary(save)}</p>
+        <p className="subtitle">可以接着这一局，也可以另选有限或无限、再选难度。新开会换掉这份存档。</p>
+        <div className="btn-row">
+          <button className="btn big ghost" onClick={onBack}>返回</button>
+          <button className="btn big ghost" onClick={onSetup}>新开一局</button>
+          <button className="btn big" onClick={onContinue}>接着存档</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BusinessSetup({ save, draft, setDraft, onStart, onBack, onContinue }) {
+  const step = rentStepFor(draft.difficulty)
+  const finite = draft.span === 'finite'
+  return (
+    <div className="overlay front">
+      <div className="panel wide">
+        <h2>{save ? '新开一局' : '经营模式'}</h2>
+        {save && (
           <>
-            <h2>新开一局</h2>
             <p className="save-note">当前存档：{saveSummary(save)}</p>
-            <p className="subtitle">确定后，存档会换成这新开的一局，原来的进度不再保留。</p>
-            <div className="btn-row">
-              <button className="btn big ghost" onClick={onBack}>返回</button>
-              <button className="btn big ghost" onClick={onContinue}>接着存档</button>
-              <button className="btn big" onClick={onConfirmNew}>确定新开</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <h2>经营模式</h2>
-            <p className="save-note">存档：{saveSummary(save)}</p>
-            <p className="subtitle">可以接着上次打烊时的进度，也可以新开一局。新开会覆盖这份存档。</p>
-            <div className="btn-row">
-              <button className="btn big ghost" onClick={onBack}>返回</button>
-              <button className="btn big ghost" onClick={onAskNew}>新开一局</button>
-              <button className="btn big" onClick={onContinue}>接着存档</button>
-            </div>
+            <p className="subtitle">确定后，存档会换成这新开的一局。</p>
           </>
         )}
+        <div className="mode-grid">
+          <button
+            className={`mod-card ${finite ? 'picked' : ''}`}
+            onClick={() => setDraft((d) => ({ ...d, span: 'finite' }))}
+          >
+            <b>有限模式</b>
+            <p>付清第 {FINITE_GOAL} 天的租金即胜利。</p>
+          </button>
+          <button
+            className={`mod-card ${finite ? '' : 'picked'}`}
+            onClick={() => setDraft((d) => ({ ...d, span: 'infinite' }))}
+          >
+            <b>无限模式</b>
+            <p>一直经营，直到付不起当天租金。</p>
+          </button>
+        </div>
+        <div className="diff-row">
+          <button
+            className="btn"
+            disabled={draft.difficulty <= DIFFICULTY_MIN}
+            onClick={() => setDraft((d) => ({ ...d, difficulty: d.difficulty - 1 }))}
+          >
+            －
+          </button>
+          <div>
+            <b>难度 {draft.difficulty}</b>
+            <p>第 1 天租金 {RENT_BASE}，之后每晚 +{step}</p>
+          </div>
+          <button
+            className="btn"
+            disabled={draft.difficulty >= DIFFICULTY_MAX}
+            onClick={() => setDraft((d) => ({ ...d, difficulty: d.difficulty + 1 }))}
+          >
+            ＋
+          </button>
+        </div>
+        <div className="btn-row">
+          <button className="btn big ghost" onClick={onBack}>返回</button>
+          {save && <button className="btn big ghost" onClick={onContinue}>接着存档</button>}
+          <button className="btn big" onClick={onStart}>{save ? '确定新开' : '开始经营'}</button>
+        </div>
       </div>
     </div>
   )
@@ -585,6 +669,7 @@ export default function App() {
   const [justRecord, setJustRecord] = useState(false)
   const [businessSave, setBusinessSave] = useState(() => loadBusinessSave())
   const [gate, setGate] = useState(null)
+  const [draft, setDraft] = useState({ span: 'finite', difficulty: DIFFICULTY_MIN })
   const [menuHint, setMenuHint] = useState('')
   const savedRun = useRef(null)
   const writeSave = useRef(false)
@@ -605,13 +690,24 @@ export default function App() {
     savedRun.current = state.runId
     const next = considerRecord(records, state)
     if (next !== records) {
-      saveRecords(next)
-      setRecords(next)
-      setJustRecord(true)
+      const stored = {
+        practiceScore: next.practiceScore,
+        bests: next.bests,
+        history: next.history,
+      }
+      saveRecords(stored)
+      setRecords(stored)
+      setJustRecord(!!next.improved)
     } else {
       setJustRecord(false)
     }
   }, [state.screen, state.runId])
+
+  useEffect(() => {
+    if (state.mode !== 'business' || state.screen !== 'over') return
+    clearBusinessSave()
+    setBusinessSave(null)
+  }, [state.mode, state.screen, state.runId])
 
   useEffect(() => {
     if (!writeSave.current) return
@@ -621,19 +717,24 @@ export default function App() {
     writeSave.current = false
   }, [state])
 
-  function beginBusiness(notice) {
+  function beginBusiness(notice, setup) {
+    const picked = setup || draft
     writeSave.current = true
     setGate(null)
     setMenuHint('')
-    dispatch({ type: 'START_BUSINESS', notice })
+    dispatch({
+      type: 'START_BUSINESS',
+      notice,
+      span: picked.span,
+      difficulty: picked.difficulty,
+    })
   }
 
   function openBusiness() {
     const save = loadBusinessSave()
     setBusinessSave(save)
     setMenuHint('')
-    if (save) setGate('choose')
-    else beginBusiness('fresh')
+    setGate(save ? 'choose' : 'setup')
   }
 
   function continueBusiness() {
@@ -673,14 +774,22 @@ export default function App() {
           onBusiness={openBusiness}
         />
       )}
-      {gate && (
+      {gate === 'choose' && businessSave && (
         <SaveGate
           save={businessSave}
-          confirmNew={gate === 'confirm'}
           onContinue={continueBusiness}
-          onAskNew={() => setGate('confirm')}
-          onConfirmNew={() => beginBusiness('overwrite')}
-          onBack={() => setGate(gate === 'confirm' && state.screen === 'start' ? 'choose' : null)}
+          onSetup={() => setGate('setup')}
+          onBack={() => setGate(null)}
+        />
+      )}
+      {gate === 'setup' && (
+        <BusinessSetup
+          save={businessSave}
+          draft={draft}
+          setDraft={setDraft}
+          onContinue={continueBusiness}
+          onBack={() => setGate(businessSave && state.screen === 'start' ? 'choose' : null)}
+          onStart={() => beginBusiness(businessSave ? 'overwrite' : 'fresh', draft)}
         />
       )}
       {state.screen === 'paused' && <PauseOverlay state={state} dispatch={dispatch} />}
@@ -696,8 +805,10 @@ export default function App() {
           onNewBusiness={() => {
             const save = loadBusinessSave()
             setBusinessSave(save)
-            if (save) setGate('confirm')
-            else beginBusiness('fresh')
+            const again = { span: state.span === 'finite' ? 'finite' : 'infinite', difficulty: state.difficulty || DIFFICULTY_MIN }
+            setDraft(again)
+            if (save) setGate('setup')
+            else beginBusiness('fresh', again)
           }}
         />
       )}

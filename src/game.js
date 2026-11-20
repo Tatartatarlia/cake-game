@@ -56,9 +56,16 @@ export const COMBO_TIP_STEP_UPGRADED = 5
 export const COMBO_TIP_CAP_UPGRADED = 20
 
 // ---------- 经营模式租金 ----------
-// 无升级时大约撑过前几晚；会攒小费、会买装备的能再往下走
+// 第 1 天都是 50。难度 1 从第 2 天起每晚 +5，难度每高 1 级再多 +5。
+// 有限模式付清第 10 天租金即通关；无限模式一直开到付不起为止。
 export const RENT_BASE = 50
-export const RENT_STEP = 30
+export const RENT_STEP_UNIT = 5
+export const DIFFICULTY_MIN = 1
+export const DIFFICULTY_MAX = 10
+export const FINITE_GOAL = 10
+export const HISTORY_LIMIT = 10
+// 改难度之前每晚 +30，等于现在的难度 6。旧存档和旧纪录按这个难度读
+export const LEGACY_DIFFICULTY = 6
 
 // 口碑可重复购买。第一次 60，之后每次贵 30。
 // 每次只加一点小费上限和急单分，避免买完常规升级后收入完全停住。
@@ -123,8 +130,22 @@ export function clampCatChance(p) {
   return Math.max(CAT_CHANCE_MIN, Math.min(0.95, n))
 }
 
-export function rentForDay(day) {
-  return RENT_BASE + Math.max(0, day - 1) * RENT_STEP
+export function clampDifficulty(difficulty) {
+  const n = Math.round(Number(difficulty))
+  if (!Number.isFinite(n)) return DIFFICULTY_MIN
+  return Math.max(DIFFICULTY_MIN, Math.min(DIFFICULTY_MAX, n))
+}
+
+export function rentStepFor(difficulty) {
+  return RENT_STEP_UNIT * clampDifficulty(difficulty)
+}
+
+export function rentForDay(day, difficulty = DIFFICULTY_MIN) {
+  return RENT_BASE + Math.max(0, day - 1) * rentStepFor(difficulty)
+}
+
+export function spanName(span) {
+  return span === 'finite' ? '有限' : '无限'
 }
 
 // 经营模式：第 1 天 7 秒，之后每天短 0.5 秒，最短 4 秒
@@ -527,6 +548,9 @@ export function createInitialState() {
     runMaxCombo: 0,
     runCompleted: 0,
     lostReason: '',
+    span: 'infinite',
+    difficulty: DIFFICULTY_MIN,
+    won: false,
   }
 }
 
@@ -565,6 +589,12 @@ function beginDay(prev, { day, rules, modifier, rent }) {
   let message = mod
     ? `第 ${day} 天 · ${mod.name}：${mod.desc}`
     : `第 ${day} 天开业！今晚租金 ${rent}`
+  if (!mod && day === 1) {
+    const step = rentStepFor(prev.difficulty)
+    message += prev.span === 'finite'
+      ? `。${spanName(prev.span)}模式，难度 ${prev.difficulty}，每晚 +${step}，满 ${FINITE_GOAL} 天通关`
+      : `。${spanName(prev.span)}模式，难度 ${prev.difficulty}，每晚 +${step}`
+  }
   if (paced.newOrderInterval < NEW_ORDER_INTERVAL) {
     message += `。订单间隔 ${paced.newOrderInterval} 秒`
   }
@@ -600,12 +630,17 @@ function beginDay(prev, { day, rules, modifier, rent }) {
   }
 }
 
-function startBusiness(notice) {
+function startBusiness(notice, options = {}) {
+  const span = options.span === 'finite' ? 'finite' : 'infinite'
+  const difficulty = clampDifficulty(options.difficulty == null ? DIFFICULTY_MIN : options.difficulty)
   const fresh = createInitialState()
   const run = beginDay({
     ...fresh,
     runId: runSeq++,
     mode: 'business',
+    span,
+    difficulty,
+    won: false,
     wallet: 0,
     totalEarned: 0,
     upgrades: {},
@@ -616,7 +651,7 @@ function startBusiness(notice) {
     day: 1,
     rules: baseRules(),
     modifier: null,
-    rent: rentForDay(1),
+    rent: rentForDay(1, difficulty),
   })
   if (notice === 'overwrite') {
     return { ...run, message: `${run.message.replace(/[。！]+$/, '')}。原存档已换成这一局` }
@@ -637,12 +672,18 @@ function bumpOrderSeq(orders) {
 
 function continueBusiness(save) {
   if (!save || save.mode !== 'business') return null
+  if (save.won) return null
   if (save.screen !== 'playing' && save.screen !== 'shop' && save.screen !== 'modifier') return null
   bumpOrderSeq(save.orders)
+  const span = save.span === 'finite' ? 'finite' : 'infinite'
+  const difficulty = save.difficulty == null ? LEGACY_DIFFICULTY : clampDifficulty(save.difficulty)
   return {
     ...createInitialState(),
     ...save,
     mode: 'business',
+    span,
+    difficulty,
+    won: false,
     rules: { ...baseRules(), ...(save.rules || {}) },
     upgrades: save.upgrades || {},
     message: '继续上次的经营',
@@ -1002,10 +1043,21 @@ function closeDay(state) {
     return {
       ...shared,
       screen: 'over',
+      won: false,
       lostReason: `第 ${state.day} 天打烊，手头 ${wallet}，租金 ${state.rent}`,
     }
   }
   const paid = wallet - state.rent
+  if (state.span === 'finite' && state.day >= FINITE_GOAL) {
+    return {
+      ...shared,
+      wallet: paid,
+      screen: 'over',
+      won: true,
+      daysCleared: state.day,
+      lostReason: '',
+    }
+  }
   const offers = rollShopOffers(state.upgrades, state.day)
   if (offers.length === 0) {
     return {
@@ -1052,11 +1104,67 @@ function pickModifier(state, id) {
   if (!(state.modifierChoices || []).some((m) => m.id === id)) return state
   const day = state.day + 1
   const rules = applyModifier(rulesFromUpgrades(state.upgrades), id)
-  return beginDay(state, { day, rules, modifier: id, rent: rentForDay(day) })
+  return beginDay(state, { day, rules, modifier: id, rent: rentForDay(day, state.difficulty) })
 }
 
 export function emptyRecords() {
-  return { practiceScore: 0, businessDays: 0, businessEarned: 0 }
+  return { practiceScore: 0, bests: [], history: [] }
+}
+
+function bestKey(span, difficulty) {
+  return `${span === 'finite' ? 'finite' : 'infinite'}:${clampDifficulty(difficulty)}`
+}
+
+function sanitizeBest(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const span = raw.span === 'finite' ? 'finite' : 'infinite'
+  const difficulty = clampDifficulty(raw.difficulty)
+  const days = Math.max(0, Number(raw.days) || 0)
+  const earned = Math.max(0, Number(raw.earned) || 0)
+  const won = !!raw.won && span === 'finite' && days >= FINITE_GOAL
+  return { span, difficulty, days, earned, won }
+}
+
+function sanitizeHistory(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.mode === 'practice') {
+    return { mode: 'practice', score: Math.max(0, Number(raw.score) || 0) }
+  }
+  if (raw.mode !== 'business') return null
+  const best = sanitizeBest(raw)
+  return best ? { mode: 'business', ...best } : null
+}
+
+function isBetterBusiness(next, prev) {
+  if (!prev) return next.days > 0 || next.won
+  if (next.days !== prev.days) return next.days > prev.days
+  if (!!next.won !== !!prev.won) return !!next.won
+  return next.earned > prev.earned
+}
+
+export function bestFor(records, span, difficulty) {
+  const key = bestKey(span, difficulty)
+  return (records?.bests || []).find((b) => bestKey(b.span, b.difficulty) === key) || null
+}
+
+export function sortedBests(records) {
+  return [...(records?.bests || [])].sort((a, b) => {
+    if (a.span !== b.span) return a.span === 'finite' ? -1 : 1
+    return a.difficulty - b.difficulty
+  })
+}
+
+export function formatBest(best) {
+  if (!best) return ''
+  const end = best.won ? `通关 ${FINITE_GOAL} 天` : `${best.days} 天`
+  const earned = best.earned ? ` · 累计 ${best.earned}` : ''
+  return `${spanName(best.span)} · 难度 ${best.difficulty} · ${end}${earned}`
+}
+
+export function formatHistory(entry) {
+  if (!entry) return ''
+  if (entry.mode === 'practice') return `练习 · ${entry.score || 0} 分`
+  return formatBest(entry)
 }
 
 export function loadRecords() {
@@ -1065,11 +1173,27 @@ export function loadRecords() {
     const raw = localStorage.getItem(RECORD_KEY)
     if (!raw) return emptyRecords()
     const p = JSON.parse(raw)
-    return {
-      practiceScore: Math.max(0, Number(p.practiceScore) || 0),
-      businessDays: Math.max(0, Number(p.businessDays) || 0),
-      businessEarned: Math.max(0, Number(p.businessEarned) || 0),
+    const practiceScore = Math.max(0, Number(p.practiceScore) || 0)
+    let bests = Array.isArray(p.bests) ? p.bests.map(sanitizeBest).filter(Boolean) : []
+    if (!Array.isArray(p.bests) && (Number(p.businessDays) || 0) > 0) {
+      bests = [{
+        span: 'infinite',
+        difficulty: LEGACY_DIFFICULTY,
+        days: Math.max(0, Number(p.businessDays) || 0),
+        earned: Math.max(0, Number(p.businessEarned) || 0),
+        won: false,
+      }]
     }
+    const merged = []
+    for (const best of bests) {
+      const idx = merged.findIndex((b) => bestKey(b.span, b.difficulty) === bestKey(best.span, best.difficulty))
+      if (idx < 0) merged.push(best)
+      else if (isBetterBusiness(best, merged[idx])) merged[idx] = best
+    }
+    const history = Array.isArray(p.history)
+      ? p.history.map(sanitizeHistory).filter(Boolean).slice(0, HISTORY_LIMIT)
+      : []
+    return { practiceScore, bests: merged, history }
   } catch {
     return emptyRecords()
   }
@@ -1090,10 +1214,12 @@ export function saveSummary(save) {
   if (!save) return ''
   const gear = upgradeSummary(save.upgrades)
   const tail = gear ? ` · ${gear}` : ''
-  if (save.screen === 'shop') return `第 ${save.day} 天已打烊，待升级 · 手头 ${save.wallet}${tail}`
-  if (save.screen === 'modifier') return `第 ${save.day} 天已打烊，待选明日状况 · 手头 ${save.wallet}${tail}`
+  const difficulty = save.difficulty == null ? LEGACY_DIFFICULTY : clampDifficulty(save.difficulty)
+  const head = `${spanName(save.span)} · 难度 ${difficulty}`
+  if (save.screen === 'shop') return `${head} · 第 ${save.day} 天已打烊，待升级 · 手头 ${save.wallet}${tail}`
+  if (save.screen === 'modifier') return `${head} · 第 ${save.day} 天已打烊，待选明日状况 · 手头 ${save.wallet}${tail}`
   const mod = save.modifier ? modifierById(save.modifier) : null
-  return `第 ${save.day} 天 · ${mod ? mod.name : '开业'} · 手头 ${save.wallet ?? 0} · 今日 ${save.score ?? 0}${tail}`
+  return `${head} · 第 ${save.day} 天 · ${mod ? mod.name : '开业'} · 手头 ${save.wallet ?? 0} · 今日 ${save.score ?? 0}${tail}`
 }
 
 export function loadBusinessSave() {
@@ -1102,8 +1228,17 @@ export function loadBusinessSave() {
     const raw = localStorage.getItem(BUSINESS_SAVE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw)
-    if (!data || data.mode !== 'business' || !RESUMABLE_SCREENS.has(data.screen)) return null
-    if (!Array.isArray(data.orders) || !data.rules) return null
+    if (!data || data.mode !== 'business' || data.won || !RESUMABLE_SCREENS.has(data.screen)) {
+      if (data && data.mode === 'business') clearBusinessSave()
+      return null
+    }
+    if (!Array.isArray(data.orders) || !data.rules) {
+      clearBusinessSave()
+      return null
+    }
+    data.span = data.span === 'finite' ? 'finite' : 'infinite'
+    data.difficulty = data.difficulty == null ? LEGACY_DIFFICULTY : clampDifficulty(data.difficulty)
+    data.won = false
     return data
   } catch {
     return null
@@ -1134,18 +1269,40 @@ export function clearBusinessSave() {
 export function considerRecord(prev, state) {
   const base = prev || emptyRecords()
   if (!state || state.screen !== 'over') return base
+  const history = Array.isArray(base.history) ? [...base.history] : []
+  const bests = Array.isArray(base.bests) ? base.bests.map((b) => ({ ...b })) : []
+  let practiceScore = base.practiceScore || 0
+  let improved = false
+
   if (state.mode === 'business') {
-    const days = state.daysCleared ?? state.day ?? 0
-    const earned = state.totalEarned || 0
-    if (days > base.businessDays || (days === base.businessDays && earned > base.businessEarned)) {
-      return { ...base, businessDays: days, businessEarned: earned }
+    const span = state.span === 'finite' ? 'finite' : 'infinite'
+    const difficulty = clampDifficulty(state.difficulty)
+    const days = Math.max(0, state.daysCleared ?? state.day ?? 0)
+    const earned = Math.max(0, state.totalEarned || 0)
+    const won = !!state.won && span === 'finite' && days >= FINITE_GOAL
+    history.unshift({ mode: 'business', span, difficulty, days, earned, won })
+    const nextBest = { span, difficulty, days, earned, won }
+    const idx = bests.findIndex((b) => bestKey(b.span, b.difficulty) === bestKey(span, difficulty))
+    if (isBetterBusiness(nextBest, idx < 0 ? null : bests[idx])) {
+      if (idx < 0) bests.push(nextBest)
+      else bests[idx] = nextBest
+      improved = true
     }
-    return base
+  } else {
+    const score = Math.max(0, state.score || 0)
+    history.unshift({ mode: 'practice', score })
+    if (score > practiceScore) {
+      practiceScore = score
+      improved = true
+    }
   }
-  if ((state.score || 0) > base.practiceScore) {
-    return { ...base, practiceScore: state.score }
+
+  return {
+    practiceScore,
+    bests,
+    history: history.slice(0, HISTORY_LIMIT),
+    improved,
   }
-  return base
 }
 
 // ------------------------------------------------------------
@@ -1153,7 +1310,8 @@ export function reducer(state, action) {
   switch (action.type) {
     case 'START':
     case 'START_PRACTICE': return startPractice()
-    case 'START_BUSINESS': return startBusiness(action.notice)
+    case 'START_BUSINESS':
+      return startBusiness(action.notice, { span: action.span, difficulty: action.difficulty })
     case 'CONTINUE_BUSINESS': return continueBusiness(action.save) || state
     case 'PAUSE': return state.screen === 'playing' ? { ...state, screen: 'paused' } : state
     case 'RESUME': return state.screen === 'paused' ? { ...state, screen: 'playing' } : state
