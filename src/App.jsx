@@ -384,8 +384,9 @@ function IngredientBar({ dispatch }) {
 // ------------------------------------------------------------
 function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) {
   return (
-    <div className="overlay">
+    <div className="overlay start-overlay">
       <div className="panel start-panel wide">
+        <div className="start-head">
         <h1>🍰 烤蛋糕小店</h1>
         <p className="subtitle">练习和每种经营难度分开记最高，并留下最近 10 局。</p>
         {menuHint && <p className="menu-hint">{menuHint}</p>}
@@ -410,6 +411,8 @@ function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) 
             </button>
           </section>
         </div>
+        </div>
+        <div className="start-scroll">
         <ul className="rules">
           <li>🔥 连击小费：2 连 <b>+3</b>，3 连 <b>+6</b>，4 连 <b>+9</b>，5 连及以上 <b>+12</b>。<b>只有订单超时</b>会断连击</li>
           <li>📋 订单时限 15-40 秒；常规超时 <b>-5</b>，急单和盲盒超时不扣分。常规 <b>+10</b>，半程前完成 <b>+15</b>，急单 <b>+25</b>，盲盒随机 <b>5~20</b></li>
@@ -436,6 +439,7 @@ function StartScreen({ dispatch, records, businessSave, menuHint, onBusiness }) 
               ))}
             </ol>
           )}
+        </div>
         </div>
       </div>
     </div>

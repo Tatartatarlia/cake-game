@@ -794,10 +794,14 @@ body {
 
 .history-list {
   margin: 0;
-  padding-left: 1.2em;
+  padding-left: 1.4em;
   font-size: 13px;
   line-height: 1.55;
   color: #5a4a3a;
+}
+
+ol.history-list {
+  padding-left: 2.2em;
 }
 
 .btn:disabled {
@@ -805,6 +809,30 @@ body {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.overlay.start-overlay {
+  overflow: hidden;
+  padding: 12px;
+}
+
+.start-panel {
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.start-head {
+  flex: 0 0 auto;
+}
+
+.start-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 6px 2px 2px;
 }
 
 .overlay.front {
